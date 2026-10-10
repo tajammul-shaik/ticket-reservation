@@ -1,0 +1,27 @@
+# Active when SPRING_PROFILES_ACTIVE=prod. Overrides application.yml.
+# Secrets have no defaults here: if one is missing the app fails at startup
+# instead of running with a dev value.
+
+server:
+  port: ${PORT:8777}
+  shutdown: graceful
+
+spring:
+  datasource:
+    url: ${DATABASE_URL}
+    username: ${DATABASE_USERNAME}
+    password: ${DATABASE_PASSWORD}
+    hikari:
+      # Managed free-tier MySQL allows few connections; keep the pool small.
+      minimum-idle: ${DB_POOL_MIN_IDLE:2}
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:10}
+
+app:
+  security:
+    jwt-secret: ${JWT_SECRET}
+    admin-secret: ${ADMIN_SECRET}
+
+management:
+  endpoint:
+    health:
+      show-details: never
