@@ -1,0 +1,649 @@
+{
+  "info": {
+    "name": "ticket-reservation",
+    "description": "Endpoints built so far (BRD steps 1-3): health, token issuance, shows.\n\nSet the `adminSecret` collection variable to ADMIN_SECRET from your env file. Run the requests top to bottom: the token and create-show requests save `userToken`, `adminToken` and `showId` for the rest.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8777"
+    },
+    {
+      "key": "adminSecret",
+      "value": "",
+      "description": "ADMIN_SECRET from ~/.config/ticket-reservation/ticket-reservation.env"
+    },
+    {
+      "key": "userId",
+      "value": "u123"
+    },
+    {
+      "key": "userToken",
+      "value": ""
+    },
+    {
+      "key": "adminToken",
+      "value": ""
+    },
+    {
+      "key": "showId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Liveness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/live",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "live"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "FR-06. 200 whenever the process runs; never touches the database."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Readiness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/ready",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "ready"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "FR-06. SELECT 1 with a 2 s limit: 200 when the DB answers, 503 not_ready otherwise."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Issue user token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "token"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{userId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "FR-01. Saves the token to {{userToken}}."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"role is user\", () => pm.expect(b.role).to.eql(\"user\"));",
+                  "pm.collectionVariables.set(\"userToken\", b.token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Issue admin token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Admin-Secret",
+                "value": "{{adminSecret}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "token"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"admin\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "FR-01. Needs the adminSecret variable. Saves the token to {{adminToken}}."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"role is admin (set adminSecret if this fails)\", () => pm.expect(b.role).to.eql(\"admin\"));",
+                  "pm.collectionVariables.set(\"adminToken\", b.token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Wrong admin secret gives user token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Admin-Secret",
+                "value": "wrong-secret"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "token"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"sneaky\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"role is user, never admin\", () => pm.expect(pm.response.json().role).to.eql(\"user\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid user_id (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "token"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"has space\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"error is invalid_request\", () => pm.expect(pm.response.json().error).to.eql(\"invalid_request\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Shows",
+      "item": [
+        {
+          "name": "Create show (admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/shows",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shows"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"friday-night\",\n  \"seats\": [\n    \"A1\",\n    \"A2\",\n    \"A3\",\n    \"A4\",\n    \"A5\",\n    \"B1\",\n    \"B2\",\n    \"B3\",\n    \"B4\",\n    \"B5\"\n  ],\n  \"price_paise\": 25000,\n  \"per_user_limit\": 4\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "FR-02. Admin only. per_user_limit is optional (default 4). Saves the id to {{showId}}."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"all seats available\", () => pm.expect(b.counts.available).to.eql(b.total_seats));",
+                  "pm.test(\"invariant ok\", () => pm.expect(b.invariant_ok).to.be.true);",
+                  "pm.collectionVariables.set(\"showId\", b.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get show",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/shows/{{showId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shows",
+                "{{showId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{userToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "FR-05. Any authenticated user. Counts, invariant_ok and per-seat status; holder ids are never exposed."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"invariant ok\", () => pm.expect(pm.response.json().invariant_ok).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get unknown show (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/shows/00000000-0000-0000-0000-000000000000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shows",
+                "00000000-0000-0000-0000-000000000000"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{userToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"error is show_not_found\", () => pm.expect(pm.response.json().error).to.eql(\"show_not_found\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create show as user (403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/shows",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shows"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"nope\",\n  \"seats\": [\n    \"A1\"\n  ],\n  \"price_paise\": 100\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{userToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"error is forbidden\", () => pm.expect(pm.response.json().error).to.eql(\"forbidden\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create show without token (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/shows",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shows"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"nope\",\n  \"seats\": [\n    \"A1\"\n  ],\n  \"price_paise\": 100\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"error is unauthorized\", () => pm.expect(pm.response.json().error).to.eql(\"unauthorized\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create show with float price (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/shows",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shows"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"bad-price\",\n  \"seats\": [\"A1\"],\n  \"price_paise\": 250.5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"error is invalid_request\", () => pm.expect(pm.response.json().error).to.eql(\"invalid_request\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create show with duplicate seats (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/shows",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shows"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"dupes\",\n  \"seats\": [\n    \"A1\",\n    \"A1\"\n  ],\n  \"price_paise\": 100\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"error is invalid_request\", () => pm.expect(pm.response.json().error).to.eql(\"invalid_request\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
