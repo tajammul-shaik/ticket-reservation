@@ -20,8 +20,3 @@ app:
   security:
     jwt-secret: ${JWT_SECRET}
     admin-secret: ${ADMIN_SECRET}
-
-management:
-  endpoint:
-    health:
-      show-details: never

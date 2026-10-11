@@ -42,6 +42,13 @@ public class ReservationController {
         return ResponseEntity.status(HttpStatus.CREATED).body(outcome.reservation());
     }
 
+    /** FR-04. 200 with status cancelled, also when it was already cancelled. */
+    @PostMapping("/reservations/{reservationId}/cancel")
+    public ReservationResponse cancel(@AuthenticationPrincipal AuthenticatedUser user,
+                                      @PathVariable String reservationId) {
+        return reservationService.cancel(user, reservationId).reservation();
+    }
+
     // Key may come in the body or the header; if both are present they must match.
     private static String resolveIdempotencyKey(String bodyKey, String headerKey) {
         if (bodyKey != null && headerKey != null && !bodyKey.equals(headerKey)) {

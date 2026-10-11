@@ -14,7 +14,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 
 /**
  * Stateless JWT API: no sessions, no CSRF, no login form. Identity comes only from the
- * bearer token (BR-08).
+ * bearer token (BR-08). Health and /metrics are public so the host and evaluators can reach them.
  */
 @Configuration
 public class SecurityConfig {
@@ -34,7 +34,7 @@ public class SecurityConfig {
                         .accessDeniedHandler(errorResponder))
                 .addFilterBefore(new JwtAuthenticationFilter(jwtService), UsernamePasswordAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(HttpMethod.GET, "/health/live", "/health/ready").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/health/live", "/health/ready", "/metrics").permitAll()
                         .requestMatchers(HttpMethod.POST, "/auth/token").permitAll()
                         .requestMatchers(HttpMethod.POST, "/shows").hasRole("ADMIN")
                         .requestMatchers("/error").permitAll()

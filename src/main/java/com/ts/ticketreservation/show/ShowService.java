@@ -2,8 +2,11 @@ package com.ts.ticketreservation.show;
 
 import com.ts.ticketreservation.common.error.ApiException;
 import com.ts.ticketreservation.common.error.ErrorCode;
+import com.ts.ticketreservation.metrics.SeatGauges;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.HashSet;
 import java.util.List;
@@ -17,9 +20,11 @@ public class ShowService {
     static final int MAX_SEATS_PER_SHOW = 10_000;
 
     private final ShowRepository showRepository;
+    private final SeatGauges seatGauges;
 
-    public ShowService(ShowRepository showRepository) {
+    public ShowService(ShowRepository showRepository, SeatGauges seatGauges) {
         this.showRepository = showRepository;
+        this.seatGauges = seatGauges;
     }
 
     /** FR-02: the show and all its seats are inserted in one transaction. */
@@ -38,6 +43,13 @@ public class ShowService {
 
         showRepository.insertShow(show);
         showRepository.insertSeats(show.id(), seats);
+        // Publish seat gauges only once the show is committed and visible to the scrape query.
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                seatGauges.register(show.id());
+            }
+        });
 
         List<ShowResponse.SeatView> seatViews = seats.stream()
                 .sorted()

@@ -49,9 +49,26 @@ app:
     jwt-secret: ${JWT_SECRET:local-dev-jwt-secret-change-me-at-least-32-bytes}
     admin-secret: ${ADMIN_SECRET:local-admin-secret}
     token-ttl: 24h
+  admission:
+    # NFR-04: requests beyond this many in flight wait up to max-wait for a slot, then get 429.
+    max-in-flight: ${ADMISSION_MAX_IN_FLIGHT:200}
+    max-wait: 5s
 
 management:
   endpoints:
     web:
+      # Prometheus scrape endpoint served at /metrics (FR-07). Health has its own controller.
+      base-path: /
+      path-mapping:
+        prometheus: metrics
       exposure:
-        include: health,prometheus
+        include: prometheus
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+
+logging:
+  pattern:
+    # Text logs (local) show the request id; JSON logs (prod) carry every MDC field.
+    correlation: "[%X{request_id:-}] "

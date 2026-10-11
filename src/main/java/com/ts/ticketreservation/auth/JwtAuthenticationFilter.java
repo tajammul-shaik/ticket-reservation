@@ -4,6 +4,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.MDC;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -40,6 +41,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 var authentication = new UsernamePasswordAuthenticationToken(
                         user, null, List.of(new SimpleGrantedAuthority(user.role().authority())));
                 SecurityContextHolder.getContext().setAuthentication(authentication);
+                // Every later log line of this request carries the user; RequestIdFilter clears the MDC.
+                MDC.put("user_id", user.userId());
             });
         }
         chain.doFilter(request, response);

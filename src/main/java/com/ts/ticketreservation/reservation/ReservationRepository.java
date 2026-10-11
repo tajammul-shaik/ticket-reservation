@@ -5,6 +5,8 @@ import org.springframework.stereotype.Repository;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -55,17 +57,62 @@ public class ReservationRepository {
                                 FROM reservations
                                 WHERE user_id = ? AND idempotency_key = ?
                                 """,
-                        (rs, rowNum) -> new StoredReservation(
-                                rs.getString("id"),
-                                rs.getString("show_id"),
-                                rs.getString("user_id"),
-                                rs.getString("request_hash"),
-                                jsonMapper.readValue(rs.getString("seats"), STRING_LIST),
-                                rs.getLong("amount_paise"),
-                                rs.getString("status")),
-                        userId, idempotencyKey)
+                        this::mapReservation, userId, idempotencyKey)
                 .stream()
                 .findFirst();
+    }
+
+    /** Owner-scoped lookup: another user's reservation is indistinguishable from a missing one. */
+    public Optional<StoredReservation> findByIdAndUser(String reservationId, String userId) {
+        return jdbcTemplate.query("""
+                                SELECT id, show_id, user_id, request_hash, seats, amount_paise, status
+                                FROM reservations
+                                WHERE id = ? AND user_id = ?
+                                """,
+                        this::mapReservation, reservationId, userId)
+                .stream()
+                .findFirst();
+    }
+
+    /** Cancel step 1: flips a confirmed reservation owned by this user; 0 rows if not. */
+    public int markCancelled(String reservationId, String userId) {
+        return jdbcTemplate.update("""
+                        UPDATE reservations SET status = 'cancelled'
+                        WHERE id = ? AND user_id = ? AND status = 'confirmed'
+                        """,
+                reservationId, userId);
+    }
+
+    /** Cancel step 2: return the user's limit capacity (BR-11). */
+    public int subtractFromUserCount(String showId, String userId, int seatCount) {
+        return jdbcTemplate.update("""
+                        UPDATE user_show_counts SET held = held - ?
+                        WHERE show_id = ? AND user_id = ? AND held >= ?
+                        """,
+                seatCount, showId, userId, seatCount);
+    }
+
+    /**
+     * Cancel step 3: free only seats still owned by this reservation (BR-10), so a seat that has
+     * since gone to someone else can never be resurrected.
+     */
+    public int releaseSeats(String reservationId) {
+        return jdbcTemplate.update("""
+                        UPDATE seats SET status = 'available', holder_user_id = NULL, reservation_id = NULL
+                        WHERE reservation_id = ? AND status = 'confirmed'
+                        """,
+                reservationId);
+    }
+
+    private StoredReservation mapReservation(ResultSet rs, int rowNum) throws SQLException {
+        return new StoredReservation(
+                rs.getString("id"),
+                rs.getString("show_id"),
+                rs.getString("user_id"),
+                rs.getString("request_hash"),
+                jsonMapper.readValue(rs.getString("seats"), STRING_LIST),
+                rs.getLong("amount_paise"),
+                rs.getString("status"));
     }
 
     /**

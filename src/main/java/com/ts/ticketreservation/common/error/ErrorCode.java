@@ -11,6 +11,7 @@ public enum ErrorCode {
     FORBIDDEN(HttpStatus.FORBIDDEN, "forbidden"),
     NOT_FOUND(HttpStatus.NOT_FOUND, "not_found"),
     SHOW_NOT_FOUND(HttpStatus.NOT_FOUND, "show_not_found"),
+    RESERVATION_NOT_FOUND(HttpStatus.NOT_FOUND, "reservation_not_found"),
     METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "method_not_allowed"),
     SEAT_TAKEN(HttpStatus.CONFLICT, "seat_taken"),
     PER_USER_LIMIT(HttpStatus.CONFLICT, "per_user_limit"),
