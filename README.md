@@ -62,7 +62,7 @@ Design details are in [`architecture.md`](architecture.md); the build log is in
 | JDK 21 | running with Maven / running tests (not needed for compose only) | `java -version` |
 | MySQL 8 | only for [section 5](#5-run-locally-with-maven-against-your-own-mysql) | `mysql --version` |
 | Node.js (for `npx`) | only for running Postman with Newman | `node --version` |
-| Python 3 with `venv` (or Docker) | only for the burst test | `python3 -m venv --help` |
+| `curl` 7.84+ and `jq` | the burst test (`burst.sh`) | `curl --version`, `jq --version` |
 | `curl`, `openssl` | trying the API, generating secrets | |
 
 You don't need to install Maven: the repository ships the Maven wrapper (`./mvnw`).
@@ -324,16 +324,18 @@ end against the API and `/metrics`:
 
 ### Step by step
 
-**1. Check the prerequisites.** You need Bash and either `python3` with the `venv` module (the
-script creates a git-ignored `.burst-venv/` with `httpx` on the first run) or Docker (it then runs
-in a `python:3.12-slim` container on the host network).
+**1. Check the prerequisites.** `burst.sh` is a single Bash script. It needs only Bash, `curl`
+7.84 or newer, and `jq`; there is nothing else to install and no Python. It sends each batch of
+requests through `curl --parallel`, so one machine can keep hundreds of requests in flight.
 
 ```sh
-python3 -m venv --help >/dev/null && echo "venv ok"   # or: docker info >/dev/null && echo "docker ok"
-chmod +x burst.sh                                     # once, if your checkout lost the executable bit
+curl --version | head -1     # 7.84 or newer
+jq --version                 # any recent version
+chmod +x burst.sh            # once, if your checkout lost the executable bit
 ```
 
-On Debian/Ubuntu without `venv`: `sudo apt install python3-venv`, or just have Docker running.
+Missing `jq`: `sudo apt install jq` (Debian/Ubuntu), `brew install jq` (macOS). macOS's own `curl`
+is recent enough on current versions; if `burst.sh` says it is too old, `brew install curl`.
 
 **2. Get the admin secret** of the service you will storm. The script creates its own show, so it
 needs an admin token:
@@ -373,7 +375,7 @@ ADMIN_SECRET='<production ADMIN_SECRET>' ./burst.sh https://ticket-reservation-0
 
 Against Render, keep `--concurrency` at 200 or below: the default of 1,000 made Render's edge
 proxy answer 502 during token minting. All options: `./burst.sh --help` (`--requests`, `--users`,
-`--storm`, `--concurrency`, `--timeout`, `--wake-timeout`).
+`--storm`, `--concurrency`, `--timeout`, `--wake-timeout`, `--keep`).
 
 **5. Read the result.** Each check prints `[PASS]` or `[FAIL]`, and the run ends with an outcome
 table, latency per status, and `ALL n CHECKS PASSED` (exit code 0) or the failed checks (exit code
@@ -406,8 +408,8 @@ ADMIN_SECRET='<secret>' ./burst.sh <BASE_URL> --concurrency 200 2>&1 | tee burst
 ```
 
 The latest live result is in [`burst-results/2026-10-12-live-render.txt`](burst-results/2026-10-12-live-render.txt).
-When the script runs in the Docker fallback, its output can arrive all at once at the end instead
-of step by step. The run is still progressing; `docker ps` shows the container.
+To debug a run, add `--keep`: the working directory (every request, response body and curl
+result line) is kept and its path printed at the end. It holds tokens, so delete it afterwards.
 
 ## 10. Deploy to Render with Aiven MySQL
 
@@ -614,7 +616,7 @@ decision, with the fields `request_id`, `user_id`, `show_id`, `seats`, `outcome`
 `/metrics`, so the numbers always agree, but it is easy to read with `curl` during a burst:
 
 ```sh
-watch -n 2 "curl -s $BASE/monitoring | python3 -m json.tool"
+watch -n 2 "curl -s $BASE/monitoring | jq ."
 ```
 
 ```json
@@ -674,4 +676,4 @@ Every error body has this shape:
 | Many `429 overloaded` during a burst | This is expected load shedding. Tune `DB_POOL_MAX_SIZE` within Aiven's connection limit, then `ADMISSION_MAX_IN_FLIGHT` (about 10 per connection). Don't lower `DB_POOL_CONNECTION_TIMEOUT_MS`. |
 | Startup fails with `Communications link failure` … `Connection attempt exceeded defined timeout` | The TLS login to the database took longer than the JDBC login timeout, which Hikari derives from `DB_POOL_CONNECTION_TIMEOUT_MS`. Keep it at the 30 s default. Also check that Aiven is Running. |
 | `Too many connections` from Aiven | The pool is larger than the free tier allows. Lower `DB_POOL_MAX_SIZE` (the app uses that many plus one for readiness). |
-| `burst.sh` says it needs python3 venv or Docker | Install `python3-venv` (e.g. `apt install python3-venv`) or start Docker. |
+| `burst.sh` says it needs `jq` or a newer `curl` | Install them: `apt install jq curl` or `brew install jq curl`. It needs curl 7.84 or newer. |
