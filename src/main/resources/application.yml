@@ -23,7 +23,8 @@ spring:
       pool-name: ticket-reservation-pool
       minimum-idle: ${DB_POOL_MIN_IDLE:10}
       maximum-pool-size: ${DB_POOL_MAX_SIZE:20}
-      connection-timeout: 30000
+      # How long a request waits for a pooled connection before it is shed as 429.
+      connection-timeout: ${DB_POOL_CONNECTION_TIMEOUT_MS:30000}
       transaction-isolation: TRANSACTION_READ_COMMITTED
       # A request waiting this long on a seat lock is shed (retried, then 429) instead of
       # holding a pooled connection for MySQL's default 50 s.
@@ -52,7 +53,7 @@ app:
   admission:
     # NFR-04: requests beyond this many in flight wait up to max-wait for a slot, then get 429.
     max-in-flight: ${ADMISSION_MAX_IN_FLIGHT:200}
-    max-wait: 5s
+    max-wait: ${ADMISSION_MAX_WAIT:5s}
 
 management:
   endpoints:

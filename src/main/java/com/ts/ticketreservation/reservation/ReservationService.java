@@ -11,6 +11,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.jdbc.CannotGetJdbcConnectionException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.nio.charset.StandardCharsets;
@@ -88,8 +89,10 @@ public class ReservationService {
             }
             logOutcome(showId, seats, "declined", e.errorCode().code());
             throw e;
-        } catch (CannotGetJdbcConnectionException e) {
-            // No pooled connection within the wait timeout: shed, do not fail (R-02).
+        } catch (CannotGetJdbcConnectionException | CannotCreateTransactionException e) {
+            // No pooled connection within the wait timeout: shed, do not fail (R-02). Through
+            // TransactionTemplate a pool timeout arrives as CannotCreateTransactionException;
+            // missing it turned pool exhaustion into 500s in the live burst.
             metrics.declined(ReservationMetrics.REASON_OVERLOADED);
             logOutcome(showId, seats, "declined", ReservationMetrics.REASON_OVERLOADED);
             throw new ApiException(ErrorCode.OVERLOADED, "service is busy, retry shortly");

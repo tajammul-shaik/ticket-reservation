@@ -166,7 +166,8 @@ async def scrape(client):
     for line in resp.text.splitlines():
         if line.startswith("#"):
             continue
-        m = re.match(r"^([a-zA-Z_:][\w:]*)(\{[^}]*\})?\s+(\S+)$", line)
+        # Greedy label match: label values can contain braces (uri="/shows/{showId}/reserve").
+        m = re.match(r"^([a-zA-Z_:][\w:]*)(\{.*\})?\s+(\S+)$", line)
         if m:
             metrics[(m.group(1), m.group(2) or "")] = float(m.group(3))
     return metrics

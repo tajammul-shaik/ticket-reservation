@@ -168,7 +168,7 @@ Docker must be running: the tests start a throwaway MySQL 8.4 container with Tes
 They never touch your local database or env file.
 
 ```sh
-./mvnw test                          # full suite (68 tests)
+./mvnw test                          # full suite (69 tests)
 ./mvnw test -Dtest=ConcurrencyTest   # only the concurrency tests
 ```
 
@@ -181,6 +181,7 @@ What the suite covers:
 | `ShowApiTest`, `AuthApiTest`, `JwtServiceTest` | show creation and validation, tokens, roles |
 | `HealthControllerTest` | readiness returns 503 within the time limit when the DB hangs |
 | `ReadinessUnderLoadTest` | readiness stays 200 while every main-pool connection is busy |
+| `PoolExhaustionTest` | a reserve that cannot get a pooled connection is `429 overloaded`, not 500 |
 | `ObservabilityTest`, `AdmissionControlFilterTest` | request ids, metrics reconcile with the DB, 429 load shedding |
 
 ## 7. Try the API
@@ -429,7 +430,7 @@ openssl rand -hex 16      # ADMIN_SECRET
    | `JWT_SECRET` | from step 3 |
    | `ADMIN_SECRET` | from step 3 |
    | `DB_POOL_MAX_SIZE` | `5` (raise only if Aiven's connection limit allows; the readiness check uses one more) |
-   | `ADMISSION_MAX_IN_FLIGHT` | optional, default `200` |
+   | `ADMISSION_MAX_IN_FLIGHT` | optional; leave unset for the prod default `50` |
 
    **Do not set `PORT`**, because Render provides it and the app reads it.
 
@@ -498,11 +499,13 @@ All settings are environment variables. In the `prod` profile the secrets and da
 | `DATABASE_URL` | local MySQL on 3306 | **required** | JDBC URL |
 | `DATABASE_USERNAME` | `root` | **required** | DB user |
 | `DATABASE_PASSWORD` | `root` | **required** | DB password |
-| `DB_POOL_MIN_IDLE` | `10` | `2` | Hikari minimum idle connections |
+| `DB_POOL_MIN_IDLE` | `10` | = `DB_POOL_MAX_SIZE` | Hikari minimum idle connections (prod keeps the pool full) |
 | `DB_POOL_MAX_SIZE` | `20` | `10` | Hikari maximum pool size (readiness uses one extra connection of its own) |
+| `DB_POOL_CONNECTION_TIMEOUT_MS` | `30000` | `5000` | how long a request waits for a pooled connection before `429 overloaded` |
 | `JWT_SECRET` | dev value | **required** | HS256 signing key, at least 32 bytes |
 | `ADMIN_SECRET` | dev value | **required** | value of `X-Admin-Secret` that yields an admin token |
-| `ADMISSION_MAX_IN_FLIGHT` | `200` | `200` | concurrent requests before new ones queue (max 5 s), then get 429 |
+| `ADMISSION_MAX_IN_FLIGHT` | `200` | `50` | concurrent requests before new ones queue at the door, then get 429 |
+| `ADMISSION_MAX_WAIT` | `5s` | `5s` | how long a request waits for an admission slot before 429 |
 | `ENV_FILE` | `~/.config/ticket-reservation/ticket-reservation.env` | not used | path of the optional local env file |
 
 ## 12. Observability
@@ -561,6 +564,6 @@ Every error body has this shape:
 | Port 8777 or 3307 already in use | Stop the other process, or change the host port in `docker-compose.yml`. |
 | Render deploy stuck on "health check" | Check the Logs tab. Usually it's the DB connection, or a wrong `ssl-mode` (it must be `sslMode`) in the URL. |
 | First request on Render is very slow | The free instance was asleep. Wait for it to wake, then retry. |
-| Many `429 overloaded` during a burst | This is expected load shedding. Tune `DB_POOL_MAX_SIZE` within Aiven's connection limit, and `ADMISSION_MAX_IN_FLIGHT`. |
+| Many `429 overloaded` during a burst | This is expected load shedding. Tune `DB_POOL_MAX_SIZE` within Aiven's connection limit, then `ADMISSION_MAX_IN_FLIGHT` (about 10 per connection) and `DB_POOL_CONNECTION_TIMEOUT_MS`. |
 | `Too many connections` from Aiven | The pool is larger than the free tier allows. Lower `DB_POOL_MAX_SIZE` (the app uses that many plus one for readiness). |
 | `burst.sh` says it needs python3 venv or Docker | Install `python3-venv` (e.g. `apt install python3-venv`) or start Docker. |
