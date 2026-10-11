@@ -2,8 +2,10 @@ package com.ts.ticketreservation.common.error;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.jdbc.CannotGetJdbcConnectionException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
@@ -68,6 +70,14 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(NoResourceFoundException.class)
     ResponseEntity<ErrorResponse> handleNoResource(NoResourceFoundException e) {
         return respond(ErrorCode.NOT_FOUND, "no such endpoint");
+    }
+
+    // No pooled connection within the wait timeout, or lock contention that outlived the
+    // retries: shed load with 429 rather than fail with 5xx (BR-15, R-02).
+    @ExceptionHandler({CannotGetJdbcConnectionException.class, PessimisticLockingFailureException.class})
+    ResponseEntity<ErrorResponse> handleOverload(Exception e) {
+        log.warn("Shedding request: {}", e.getClass().getSimpleName());
+        return respond(ErrorCode.OVERLOADED, "service is busy, retry shortly");
     }
 
     @ExceptionHandler(Exception.class)

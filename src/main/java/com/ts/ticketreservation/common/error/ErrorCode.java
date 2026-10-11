@@ -6,11 +6,16 @@ import org.springframework.http.HttpStatus;
 public enum ErrorCode {
 
     INVALID_REQUEST(HttpStatus.BAD_REQUEST, "invalid_request"),
+    INVALID_SEAT(HttpStatus.BAD_REQUEST, "invalid_seat"),
     UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "unauthorized"),
     FORBIDDEN(HttpStatus.FORBIDDEN, "forbidden"),
     NOT_FOUND(HttpStatus.NOT_FOUND, "not_found"),
     SHOW_NOT_FOUND(HttpStatus.NOT_FOUND, "show_not_found"),
     METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "method_not_allowed"),
+    SEAT_TAKEN(HttpStatus.CONFLICT, "seat_taken"),
+    PER_USER_LIMIT(HttpStatus.CONFLICT, "per_user_limit"),
+    IDEMPOTENCY_KEY_CONFLICT(HttpStatus.CONFLICT, "idempotency_key_conflict"),
+    OVERLOADED(HttpStatus.TOO_MANY_REQUESTS, "overloaded"),
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "internal_error");
 
     private final HttpStatus status;

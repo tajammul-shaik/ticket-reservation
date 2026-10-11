@@ -25,6 +25,9 @@ spring:
       maximum-pool-size: ${DB_POOL_MAX_SIZE:20}
       connection-timeout: 30000
       transaction-isolation: TRANSACTION_READ_COMMITTED
+      # A request waiting this long on a seat lock is shed (retried, then 429) instead of
+      # holding a pooled connection for MySQL's default 50 s.
+      connection-init-sql: SET SESSION innodb_lock_wait_timeout = 5
       data-source-properties:
         # Lets JDBC batches (seat inserts on show creation) go to MySQL as multi-row INSERTs.
         rewriteBatchedStatements: true

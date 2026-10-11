@@ -5,8 +5,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.JsonNode;
@@ -46,7 +48,7 @@ public abstract class IntegrationTest {
                 .build();
     }
 
-    protected record Response(int status, JsonNode body) {
+    protected record Response(int status, JsonNode body, HttpHeaders headers) {
     }
 
     protected Response get(String path, String token) {
@@ -84,9 +86,9 @@ public abstract class IntegrationTest {
         return toResponse(entity);
     }
 
-    private Response toResponse(org.springframework.http.ResponseEntity<String> entity) {
+    protected Response toResponse(ResponseEntity<String> entity) {
         String body = entity.getBody();
         JsonNode json = body == null || body.isBlank() ? null : jsonMapper.readTree(body);
-        return new Response(entity.getStatusCode().value(), json);
+        return new Response(entity.getStatusCode().value(), json, entity.getHeaders());
     }
 }
