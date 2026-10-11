@@ -1,0 +1,71 @@
+# Live burst, 2026-10-12
+# Command: ADMIN_SECRET=<redacted> ./burst.sh https://ticket-reservation-05jk.onrender.com --concurrency 200
+# Build: commit 941decd (instance started ~2 min after it was pushed; live pool max confirmed as 5)
+# Render: DB_POOL_SIZE=5 (pool max 5), ADMISSION_MAX_IN_FLIGHT=32, admission wait from ADMISSION_ACQUIRE_TIMEOUT
+
+== Burst run 7b76521c against https://ticket-reservation-05jk.onrender.com
+
+1. Setup
+  ready (617 ms)
+  show caaebf85-d9f2-44a2-b960-e85963b70471: 200 seats, limit 4
+  minted 2000 user tokens in 415.9s
+
+2. Hot-seat storm: 500 users reserve A12 at once
+  statuses {409: 499, 201: 1}  reasons {'seat_taken': 499}  transport {}  proxy {}
+  [PASS] hot seat A12 has exactly one winner: 1 x 201
+  [PASS] no 5xx in the storm: 0 x 5xx
+
+3. Stampede: 20000 requests for 1-2 seats, weighted toward ['A1', 'A2', 'A3', 'A12', 'B5']
+  20000 requests in 547.3s (37 req/s)
+  [PASS] no 5xx in the stampede: 0 x 5xx
+
+4. Idempotency: 20 parallel calls with one key, then the same key with other seats
+  [PASS] one reservation for 20 same-key calls: 1 x 201, 19 replays, 1 distinct ids, 0 shed or failed
+  [PASS] same key, different seats -> 409 idempotency_key_conflict: 409
+
+5. Per-user limit: one user, 10 parallel single-seat requests (limit 4)
+  [PASS] at most 4 confirmed for one user: 4 x 201, declines {'per_user_limit': 6}
+
+6. Spoofing: body user_id is ignored; cross-user cancel is 404
+  [PASS] reservation belongs to the token user, not the body user_id: owner=burst-7b76521c-attacker
+  [PASS] cancelling another user's reservation -> 404: 404
+  [PASS] no 5xx in the functional checks: 0 x 5xx
+
+7. Reconcile
+  [PASS] invariant_ok and available + held + confirmed == total_seats: {'available': 0, 'held': 0, 'confirmed': 200} total=200
+  [PASS] no seat confirmed to two users: 200 seats in 201s, 200 distinct
+  [PASS] confirmed seats in API match the 201 responses: api=200 responses=200 (+ up to 0 from timed-out requests)
+  [PASS] no user above the per-user limit: max held=4
+  [PASS] reservations_confirmed_total matches the 201 responses: metric=151 responses=151 (+ up to 0 timed out)
+  [PASS] seats_confirmed gauge == API confirmed count: gauge=200
+  [PASS] reservations_declined_total{reason=seat_taken} delta >= declines seen: delta=20300 seen=20300
+  [PASS] reservations_declined_total{reason=per_user_limit} delta >= declines seen: delta=55 seen=55
+  [PASS] server-side 5xx on API endpoints did not grow: delta=0
+  [PASS] service did not restart during the run: uptime 601s -> 1224s
+  (info) /health/ready 503s during the run: 0
+
+== Outcome table (storm + stampede + functional checks)
+  reserve requests sent                         20534
+  confirmed (201)                               158
+  idempotent replays (200)                      19
+  declined: seat_taken (409)                    20300
+  declined: per_user_limit (409)                55
+  declined: idempotency_key_conflict (409)      1
+  shed: overloaded (429)                        0
+  other 4xx                                     1
+  server errors (5xx from the app)              0
+  proxy errors (502/503/504, not from the app)  0
+  client timeouts / transport errors            0
+  hot-seat A12 winners                          1
+  seats sold (main show)                        200 / 200
+  reconciliation                                OK
+
+  latency (s)      p50     p95     p99     max
+  200            1.938   2.471   2.541   2.541   (n=19)
+  201           11.679  15.695  17.142  17.714   (n=158)
+  404            0.330   0.330   0.330   0.330   (n=1)
+  409            4.122  12.265  19.518  26.580   (n=20356)
+
+  total run time 1045s; main show caaebf85-d9f2-44a2-b960-e85963b70471
+
+ALL 19 CHECKS PASSED

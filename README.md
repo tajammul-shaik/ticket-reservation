@@ -322,21 +322,92 @@ end against the API and `/metrics`:
 7. **Reconcile:** `invariant_ok`, no seat sold twice, nobody over the limit, metrics match the API,
    and no server-side 5xx on API endpoints.
 
+### Step by step
+
+**1. Check the prerequisites.** You need Bash and either `python3` with the `venv` module (the
+script creates a git-ignored `.burst-venv/` with `httpx` on the first run) or Docker (it then runs
+in a `python:3.12-slim` container on the host network).
+
+```sh
+python3 -m venv --help >/dev/null && echo "venv ok"   # or: docker info >/dev/null && echo "docker ok"
+chmod +x burst.sh                                     # once, if your checkout lost the executable bit
+```
+
+On Debian/Ubuntu without `venv`: `sudo apt install python3-venv`, or just have Docker running.
+
+**2. Get the admin secret** of the service you will storm. The script creates its own show, so it
+needs an admin token:
+
+| Target | `ADMIN_SECRET` |
+|---|---|
+| Local compose stack (section 4) | `compose-local-admin-secret` |
+| Local Maven run (section 5) | the `ADMIN_SECRET` in your env file |
+| Render | the `ADMIN_SECRET` in the service's **Environment** tab |
+
+Pass it only as an environment variable, never as an argument, so it doesn't end up in your shell
+history or the process list.
+
+**3. Start (or wake) the service.**
+
+```sh
+docker compose up --build -d                                         # local stack on :8777
+curl -s https://ticket-reservation-05jk.onrender.com/health/live    # wake a sleeping Render instance
+```
+
+The script also waits for `/health/ready` itself (up to `--wake-timeout`, 180 s by default), so a
+sleeping free instance is fine.
+
+**4. Run it.**
+
 ```sh
 # local compose stack
 ADMIN_SECRET=compose-local-admin-secret ./burst.sh http://localhost:8777
 
-# deployed service (pass the secret only through the environment)
-ADMIN_SECRET=<production ADMIN_SECRET> ./burst.sh https://<your-service>.onrender.com
+# live service: the full burst (about 15-20 minutes on Render's free tier)
+ADMIN_SECRET='<production ADMIN_SECRET>' ./burst.sh https://ticket-reservation-05jk.onrender.com --concurrency 200
 
-./burst.sh --help    # --requests, --users, --storm, --concurrency, --timeout, --wake-timeout
+# live service: a quicker run (about 3-4 minutes)
+ADMIN_SECRET='<production ADMIN_SECRET>' ./burst.sh https://ticket-reservation-05jk.onrender.com \
+    --requests 2000 --users 300 --storm 100 --concurrency 100
 ```
 
-The script needs either `python3` with the `venv` module (it creates a git-ignored `.burst-venv/`
-with `httpx` on the first run) or Docker (it then runs in a `python:3.12-slim` container on the
-host network). It prints an outcome table and p50/p95/p99 latency per status, and exits 1 if any
-check fails. `429 overloaded` responses and client timeouts are reported but do not fail the run:
-shedding load is the intended behaviour, and a timed-out request may still have committed.
+Against Render, keep `--concurrency` at 200 or below: the default of 1,000 made Render's edge
+proxy answer 502 during token minting. All options: `./burst.sh --help` (`--requests`, `--users`,
+`--storm`, `--concurrency`, `--timeout`, `--wake-timeout`).
+
+**5. Read the result.** Each check prints `[PASS]` or `[FAIL]`, and the run ends with an outcome
+table, latency per status, and `ALL n CHECKS PASSED` (exit code 0) or the failed checks (exit code
+1). A passing live run looks like this:
+
+```
+  reserve requests sent                         20534
+  confirmed (201)                               158
+  declined: seat_taken (409)                    20300
+  shed: overloaded (429)                        0
+  server errors (5xx from the app)              0
+  proxy errors (502/503/504, not from the app)  0
+  client timeouts / transport errors            0
+  hot-seat A12 winners                          1
+  seats sold (main show)                        200 / 200
+  reconciliation                                OK
+ALL 19 CHECKS PASSED
+```
+
+What fails the run: any 5xx from the app, server-side 5xx in `/metrics`, a restart of the service
+during the run, or a broken invariant (a seat sold twice, a user over the limit, metrics that don't
+match the API). What doesn't: `429 overloaded` (shedding load is intended), client timeouts, and
+502/503/504 from the hosting proxy. These are reported separately, and a request that timed out
+may still have committed, so the reconciliation allows for it.
+
+**6. Keep the output** (optional). Save it next to the earlier runs:
+
+```sh
+ADMIN_SECRET='<secret>' ./burst.sh <BASE_URL> --concurrency 200 2>&1 | tee burst-results/$(date +%F)-run.txt
+```
+
+The latest live result is in [`burst-results/2026-10-12-live-render.txt`](burst-results/2026-10-12-live-render.txt).
+When the script runs in the Docker fallback, its output can arrive all at once at the end instead
+of step by step. The run is still progressing; `docker ps` shows the container.
 
 ## 10. Deploy to Render with Aiven MySQL
 
