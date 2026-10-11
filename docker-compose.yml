@@ -1,0 +1,61 @@
+# Local stack: the app image plus MySQL 8.4 (BRD OPS-02, NFR-12).
+#   docker compose up --build      -> app on http://localhost:8777
+#   docker compose down            -> stop (data kept in the mysql-data volume)
+#   docker compose down -v         -> stop and wipe the database
+#
+# The app runs the same image and the same prod profile as the deployed service; only the
+# environment values differ. Secrets below are local-only defaults; override them with real
+# environment variables or a .env file next to this one (git-ignored).
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ticket_reservation
+      MYSQL_USER: ticket_app
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ticket_app}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    ports:
+      # Host 3307, so it does not clash with a MySQL already running on 3306.
+      - "3307:3306"
+    healthcheck:
+      # "Healthy" only once MySQL accepts logins, so the app never starts against a
+      # half-initialised database.
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u ticket_app -p$${MYSQL_PASSWORD} --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  app:
+    build: .
+    image: ticket-reservation:local
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      PORT: 8777
+      # "mysql" is the service name above; Compose's network resolves it.
+      DATABASE_URL: jdbc:mysql://mysql:3306/ticket_reservation?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      DATABASE_USERNAME: ticket_app
+      DATABASE_PASSWORD: ${MYSQL_PASSWORD:-ticket_app}
+      JWT_SECRET: ${JWT_SECRET:-compose-local-jwt-secret-that-is-at-least-32-bytes}
+      ADMIN_SECRET: ${ADMIN_SECRET:-compose-local-admin-secret}
+    ports:
+      - "8777:8777"
+    healthcheck:
+      # Same check the host uses (OPS-06): ready only when the DB answers SELECT 1.
+      test: ["CMD", "curl", "-fsS", "http://localhost:8777/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    # Mirror the free-tier instance so memory problems show up locally, not after deploy.
+    mem_limit: 512m
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
