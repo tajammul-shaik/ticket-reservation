@@ -19,7 +19,8 @@ class AdmissionControlFilterTest {
 
     private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
     private final AdmissionControlFilter filter = new AdmissionControlFilter(
-            new AdmissionProperties(1, Duration.ofMillis(100)), new ReservationMetrics(registry), new JsonMapper());
+            new AdmissionProperties(1, Duration.ofMillis(100)), new ReservationMetrics(registry), new JsonMapper(),
+            registry);
 
     @Test
     void shedsWith429WhenNoSlotFreesUpInTime() throws Exception {

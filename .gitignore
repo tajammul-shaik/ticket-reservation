@@ -39,3 +39,6 @@ build/
 
 ### Docs kept out of the repo ###
 *.docx
+
+### Burst script virtualenv ###
+.burst-venv/

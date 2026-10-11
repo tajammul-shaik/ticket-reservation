@@ -168,7 +168,7 @@ Docker must be running: the tests start a throwaway MySQL 8.4 container with Tes
 They never touch your local database or env file.
 
 ```sh
-./mvnw test                          # full suite (69 tests)
+./mvnw test                          # full suite (70 tests)
 ./mvnw test -Dtest=ConcurrencyTest   # only the concurrency tests
 ```
 
@@ -183,6 +183,7 @@ What the suite covers:
 | `ReadinessUnderLoadTest` | readiness stays 200 while every main-pool connection is busy |
 | `PoolExhaustionTest` | a reserve that cannot get a pooled connection is `429 overloaded`, not 500 |
 | `ObservabilityTest`, `AdmissionControlFilterTest` | request ids, metrics reconcile with the DB, 429 load shedding |
+| `MonitoringApiTest` | `/monitoring` is public, agrees with the API, and leaks no user ids |
 
 ## 7. Try the API
 
@@ -206,6 +207,7 @@ ADMIN_SECRET=compose-local-admin-secret
 | `GET /health/live` | none | the process is up |
 | `GET /health/ready` | none | the DB answers within 2 s (else 503) |
 | `GET /metrics` | none | Prometheus metrics |
+| `GET /monitoring` | none | the same numbers as one readable JSON snapshot |
 
 ### 7.1 Get tokens
 
@@ -281,8 +283,8 @@ same body. Cancelling someone else's reservation returns `404 reservation_not_fo
 
 ## 8. Run the Postman collection
 
-`postman/ticket-reservation.postman_collection.json` has 23 requests covering health, auth, shows,
-reservations, cancel and metrics, with assertions. Each request depends on the ones before it, so
+`postman/ticket-reservation.postman_collection.json` has 24 requests covering health, auth, shows,
+reservations, cancel, metrics and the monitoring snapshot, with assertions. Each request depends on the ones before it, so
 run them in order.
 
 **In the Postman app:**
@@ -303,7 +305,7 @@ npx -y newman@6.2.1 run postman/ticket-reservation.postman_collection.json \
   --env-var "adminSecret=<production ADMIN_SECRET>"
 ```
 
-The expected result is 23 requests and 47 assertions, with 0 failures.
+The expected result is 24 requests and 54 assertions, with 0 failures.
 
 ## 9. Run the burst test
 
@@ -527,6 +529,31 @@ decision, with the fields `request_id`, `user_id`, `show_id`, `seats`, `outcome`
 | `seats_available` / `seats_held` / `seats_confirmed{show_id}` | read from the DB at scrape time |
 | `http_server_requests_seconds` | latency histogram (p50/p95/p99) |
 | `hikaricp_connections_pending` | requests waiting for a DB connection |
+| `admission_in_flight` / `admission_waiting` / `admission_max_in_flight` | admission control load and limit |
+
+**Monitoring snapshot** (`GET /monitoring`, public, JSON). It reads from the same registry as
+`/metrics`, so the numbers always agree, but it is easy to read with `curl` during a burst:
+
+```sh
+watch -n 2 "curl -s $BASE/monitoring | python3 -m json.tool"
+```
+
+```json
+{
+  "status": "UP",                          // "DEGRADED" when the database does not answer
+  "uptime_seconds": 6,
+  "database":  { "reachable": true, "pool": { "active": 0, "idle": 10, "pending": 0, "max": 10 } },
+  "admission": { "in_flight": 0, "waiting": 0, "max_in_flight": 50 },
+  "jvm":       { "heap_used_bytes": 36201184, "heap_max_bytes": 389283840, "live_threads": 27 },
+  "http_responses_by_status": { "200": 2, "201": 2, "409": 1 },
+  "reservations": { "confirmed": 1, "cancelled": 0,
+                    "declined": { "seat_taken": 1, "per_user_limit": 0, "overloaded": 0, ... } },
+  "shows": [ { "show_id": "...", "available": 2, "held": 0, "confirmed": 1 } ]
+}
+```
+
+`http_responses_by_status` counts API endpoints only (not health, metrics or monitoring). Counters
+are per instance and reset on restart. The snapshot shows aggregates only, never user ids.
 
 **Health.** `/health/live` checks only that the process is running. `/health/ready` runs
 `SELECT 1` with a hard 2 s limit and returns `503 not_ready` when the database is down. It uses

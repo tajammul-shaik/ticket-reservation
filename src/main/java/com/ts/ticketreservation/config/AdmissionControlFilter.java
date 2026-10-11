@@ -3,6 +3,8 @@ package com.ts.ticketreservation.config;
 import com.ts.ticketreservation.common.error.ErrorCode;
 import com.ts.ticketreservation.common.error.ErrorResponse;
 import com.ts.ticketreservation.metrics.ReservationMetrics;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -22,7 +24,8 @@ import java.util.regex.Pattern;
 /**
  * NFR-04. At most max-in-flight API requests run at once; a request that cannot get a slot
  * within max-wait is shed with 429 overloaded instead of queueing until it times out as a 5xx.
- * Health and metrics are exempt so the host and Prometheus can always reach them.
+ * Health, metrics and monitoring are exempt so the host and Prometheus can always reach them.
+ * In-flight and limit are published as admission_in_flight / admission_max_in_flight.
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 10)
@@ -35,17 +38,28 @@ public class AdmissionControlFilter extends OncePerRequestFilter {
     private final ReservationMetrics metrics;
     private final JsonMapper jsonMapper;
 
-    public AdmissionControlFilter(AdmissionProperties properties, ReservationMetrics metrics, JsonMapper jsonMapper) {
+    public AdmissionControlFilter(AdmissionProperties properties, ReservationMetrics metrics, JsonMapper jsonMapper,
+                                  MeterRegistry registry) {
         this.slots = new Semaphore(properties.maxInFlight(), true);
         this.maxWaitMillis = properties.maxWait().toMillis();
         this.metrics = metrics;
         this.jsonMapper = jsonMapper;
+        int maxInFlight = properties.maxInFlight();
+        Gauge.builder("admission.in_flight", slots, s -> maxInFlight - s.availablePermits())
+                .description("API requests currently admitted")
+                .register(registry);
+        Gauge.builder("admission.max_in_flight", () -> maxInFlight)
+                .description("Admission limit (ADMISSION_MAX_IN_FLIGHT)")
+                .register(registry);
+        Gauge.builder("admission.waiting", slots, Semaphore::getQueueLength)
+                .description("Requests waiting for an admission slot")
+                .register(registry);
     }
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
-        return path.startsWith("/health/") || path.equals("/metrics");
+        return path.startsWith("/health/") || path.equals("/metrics") || path.equals("/monitoring");
     }
 
     @Override

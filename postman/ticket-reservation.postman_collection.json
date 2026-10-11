@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "ticket-reservation",
-    "description": "Endpoints built so far (BRD steps 1-7): health, token issuance, shows, reserve, cancel, metrics.\n\nSet the `adminSecret` collection variable to ADMIN_SECRET from your env file. Run the requests top to bottom: the token and create-show requests save `userToken`, `adminToken` and `showId` for the rest.",
+    "description": "Every endpoint of the service: health, token issuance, shows, reserve, cancel, metrics and the monitoring snapshot.\n\nSet the `adminSecret` collection variable to the environment's ADMIN_SECRET (`compose-local-admin-secret` for docker compose). Run the requests top to bottom: the token and create-show requests save `userToken`, `adminToken` and `showId` for the rest.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -1140,7 +1140,7 @@
             "auth": {
               "type": "noauth"
             },
-            "description": "FR-07. Public. Counters, seat gauges read from the DB, request latency histogram, pool saturation."
+            "description": "FR-07. Public. Counters, seat gauges read from the DB, request latency histogram, pool saturation, admission load."
           },
           "event": [
             {
@@ -1150,7 +1150,61 @@
                 "exec": [
                   "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
                   "pm.test(\"has reservation counters\", () => pm.expect(pm.response.text()).to.include(\"reservations_confirmed_total\"));",
-                  "pm.test(\"has seat gauges\", () => pm.expect(pm.response.text()).to.include(\"seats_available\"));"
+                  "pm.test(\"has seat gauges\", () => pm.expect(pm.response.text()).to.include(\"seats_available\"));",
+                  "pm.test(\"has admission gauges\", () => pm.expect(pm.response.text()).to.include(\"admission_in_flight\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Monitoring snapshot",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/monitoring",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "monitoring"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "Public. The /metrics registry as one readable JSON snapshot: status (UP / DEGRADED), database and pool, admission load, heap, API responses by status, reservation counters and seats per show. Aggregates only, never user ids."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"service is UP with the database reachable\", () => {",
+                  "    pm.expect(body.status).to.eql(\"UP\");",
+                  "    pm.expect(body.database.reachable).to.eql(true);",
+                  "});",
+                  "pm.test(\"pool and admission are reported\", () => {",
+                  "    pm.expect(body.database.pool.max).to.be.a(\"number\").and.above(0);",
+                  "    pm.expect(body.admission.max_in_flight).to.be.a(\"number\").and.above(0);",
+                  "    pm.expect(body.admission.in_flight).to.be.a(\"number\");",
+                  "});",
+                  "pm.test(\"counters reflect this run\", () => {",
+                  "    pm.expect(body.reservations.confirmed).to.be.above(0);",
+                  "    pm.expect(body.reservations.cancelled).to.be.above(0);",
+                  "    pm.expect(body.reservations.declined.seat_taken).to.be.above(0);",
+                  "    pm.expect(body.http_responses_by_status).to.have.property(\"201\");",
+                  "});",
+                  "pm.test(\"the collection's show is listed with consistent seat counts\", () => {",
+                  "    const show = body.shows.find(s => s.show_id === pm.collectionVariables.get(\"showId\"));",
+                  "    pm.expect(show, \"show in snapshot\").to.be.an(\"object\");",
+                  "    pm.expect(show.available + show.held + show.confirmed).to.be.above(0);",
+                  "});",
+                  "pm.test(\"no user ids leak\", () => pm.expect(pm.response.text()).to.not.include(pm.collectionVariables.get(\"userId\")));"
                 ]
               }
             }
