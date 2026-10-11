@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
+import java.sql.DriverManager;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -42,5 +43,16 @@ class ReadinessUnderLoadTest extends IntegrationTest {
                 connection.close();
             }
         }
+    }
+
+    /**
+     * The readiness pool must not shrink the JVM-wide JDBC login timeout to its 2 s limit: new
+     * main-pool connections to a managed TLS database would then fail to log in.
+     */
+    @Test
+    void readinessDoesNotShortenTheJdbcLoginTimeout() {
+        assertThat(get("/health/ready", null).status()).isEqualTo(200);
+
+        assertThat(DriverManager.getLoginTimeout()).isGreaterThanOrEqualTo(10);
     }
 }

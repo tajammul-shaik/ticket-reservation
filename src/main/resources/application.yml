@@ -23,7 +23,10 @@ spring:
       pool-name: ticket-reservation-pool
       minimum-idle: ${DB_POOL_MIN_IDLE:10}
       maximum-pool-size: ${DB_POOL_MAX_SIZE:20}
-      # How long a request waits for a pooled connection before it is shed as 429.
+      # How long a request waits for a pooled connection before it is shed as 429. Hikari also
+      # derives the JDBC login timeout from it, through DriverManager, which is JVM-wide: too low
+      # and a TLS login to managed MySQL fails at startup (5 s did, on Render + Aiven). Shed
+      # load with ADMISSION_MAX_IN_FLIGHT instead of lowering this.
       connection-timeout: ${DB_POOL_CONNECTION_TIMEOUT_MS:30000}
       transaction-isolation: TRANSACTION_READ_COMMITTED
       # A request waiting this long on a seat lock is shed (retried, then 429) instead of

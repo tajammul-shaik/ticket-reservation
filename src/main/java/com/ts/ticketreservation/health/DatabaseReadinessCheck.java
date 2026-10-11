@@ -30,6 +30,11 @@ public class DatabaseReadinessCheck implements AutoCloseable {
 
     static final Duration TIMEOUT = Duration.ofSeconds(2);
 
+    // Hikari turns a pool's connection timeout into DriverManager's login timeout, which is
+    // JVM-wide: a 2 s value here would also cut the main pool's TLS logins to 2 s. The 2 s
+    // readiness limit is enforced by the Future in isDatabaseReachable instead.
+    static final Duration POOL_CONNECTION_TIMEOUT = Duration.ofSeconds(30);
+
     private final JdbcTemplate jdbcTemplate;
     private final HikariDataSource healthDataSource;
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
@@ -40,7 +45,7 @@ public class DatabaseReadinessCheck implements AutoCloseable {
         healthDataSource.setPoolName("health-check-pool");
         healthDataSource.setMaximumPoolSize(1);
         healthDataSource.setMinimumIdle(1); // keep one warm connection; a new TLS handshake can be slow
-        healthDataSource.setConnectionTimeout(TIMEOUT.toMillis());
+        healthDataSource.setConnectionTimeout(POOL_CONNECTION_TIMEOUT.toMillis());
         healthDataSource.setInitializationFailTimeout(-1); // never block startup on the check's pool
         this.jdbcTemplate = new JdbcTemplate(healthDataSource);
     }
