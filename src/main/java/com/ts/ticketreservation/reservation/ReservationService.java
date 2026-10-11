@@ -167,7 +167,9 @@ public class ReservationService {
 
     /**
      * Runs one transaction, retrying up to {@link #MAX_LOCK_RETRIES} times on MySQL 1213
-     * (deadlock) or 1205 (lock wait timeout), each of which rolls the transaction back (NFR-02).
+     * (deadlock) or 1205 (lock wait timeout) (NFR-02). MySQL rolls back the whole transaction on
+     * a deadlock but only the failed statement on a lock wait timeout; either way the exception
+     * leaves the TransactionTemplate, which rolls the transaction back before the retry.
      */
     private <T> T inTransactionWithLockRetries(String operation, Supplier<T> work) {
         for (int attempt = 0; ; attempt++) {

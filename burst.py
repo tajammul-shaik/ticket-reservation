@@ -17,8 +17,10 @@ Steps:
   7. Reconcile: show invariant, no seat sold twice, nobody over the limit, metrics vs API.
 
 Steps 4-6 use a second small show, so they still have free seats after the stampede.
-Transport errors and client timeouts are counted apart from HTTP statuses (BRD R-10): they are
-reported, but only real 5xx responses and broken invariants fail the run (exit code 1).
+Transport errors and client timeouts are counted apart from HTTP statuses (BRD R-10), and so are
+gateway errors from the hosting proxy (a 502/503/504 without the app's JSON error body; the app
+never returns 502 or 504). They are reported, but only 5xx responses from the app, server-side
+5xx in /metrics, a restart during the run, and broken invariants fail the run (exit code 1).
 """
 
 import argparse
@@ -43,6 +45,17 @@ socket.getaddrinfo = functools.lru_cache(maxsize=None)(socket.getaddrinfo)
 HOT_SEATS = ["A1", "A2", "A3", "A12", "B5"]
 
 
+def is_edge_error(resp):
+    """A 502/503/504 produced by the hosting proxy, not the app: no JSON error body."""
+    return (not isinstance(resp, Exception) and resp.status_code in (502, 503, 504)
+            and "application/json" not in resp.headers.get("content-type", ""))
+
+
+def outcome_unknown(resp):
+    """No answer from the app: the request may or may not have committed on the server."""
+    return isinstance(resp, Exception) or is_edge_error(resp)
+
+
 class Outcomes:
     """Counts what came back: HTTP statuses, error codes, and transport failures."""
 
@@ -50,11 +63,15 @@ class Outcomes:
         self.status = collections.Counter()
         self.reasons = collections.Counter()
         self.transport = collections.Counter()
+        self.edge = collections.Counter()
         self.latency = collections.defaultdict(list)
 
     def record(self, resp, elapsed):
         if isinstance(resp, Exception):
             self.transport[type(resp).__name__] += 1
+            return
+        if is_edge_error(resp):
+            self.edge[resp.status_code] += 1
             return
         self.status[resp.status_code] += 1
         self.latency[resp.status_code].append(elapsed)
@@ -69,7 +86,7 @@ class Outcomes:
         return sum(n for code, n in self.status.items() if code >= 500)
 
     def total(self):
-        return sum(self.status.values()) + sum(self.transport.values())
+        return sum(self.status.values()) + sum(self.transport.values()) + sum(self.edge.values())
 
 
 class Client:
@@ -100,10 +117,10 @@ class Client:
         return resp, elapsed
 
     async def call_with_retry(self, method, path, attempts=8, **kwargs):
-        """For setup calls (tokens, show creation): retry 429 and transport errors."""
+        """For setup calls (tokens, show creation): retry 429, proxy errors and transport errors."""
         for attempt in range(attempts):
             resp, _ = await self.call(method, path, **kwargs)
-            if not isinstance(resp, Exception) and resp.status_code != 429:
+            if not outcome_unknown(resp) and resp.status_code != 429:
                 return resp
             await asyncio.sleep(min(2 ** attempt * 0.25, 5) + random.random() * 0.25)
         raise RuntimeError(f"{method} {path} kept failing: {resp!r}")
@@ -259,7 +276,8 @@ async def main():
         storm_resps = await asyncio.gather(*(
             reserve(client, storm, tokens[u], show_id, ["A12"], f"storm-{run}-{u}") for u in storm_users))
         storm_wins = confirmed_from(zip(storm_users, storm_resps))
-        print(f"  statuses {dict(storm.status)}  reasons {dict(storm.reasons)}  transport {dict(storm.transport)}")
+        print(f"  statuses {dict(storm.status)}  reasons {dict(storm.reasons)}  transport {dict(storm.transport)}"
+              f"  proxy {dict(storm.edge)}")
         checks.check("hot seat A12 has exactly one winner", len(storm_wins) == 1, f"{len(storm_wins)} x 201")
         checks.check("no 5xx in the storm", storm.server_errors == 0, f"{storm.server_errors} x 5xx")
 
@@ -343,11 +361,12 @@ async def main():
         c = final["counts"]
         wins = storm_wins + stampede_wins
         sold = [s for _, seats, _ in wins for s in seats]
-        # A request that timed out on the client may still have committed on the server, so its
-        # seats and reservation can show up in the API and metrics without a 201 here.
+        # A request that timed out on the client, or got a proxy error, may still have committed
+        # on the server, so its seats and reservation can show up in the API and metrics
+        # without a 201 here.
         unknown = [seats for seats, r in
                    [(["A12"], r) for r in storm_resps] + [(seats, r) for (_, seats, _), r in zip(plan, stampede_resps)]
-                   if isinstance(r, Exception)]
+                   if outcome_unknown(r)]
         unknown_seats = sum(len(x) for x in unknown)
         per_user = collections.Counter()
         for user, seats, _ in wins:
@@ -384,6 +403,10 @@ async def main():
                        and ('uri="/health' in lbl) == health)
         api_5xx = server_5xx(after, False) - server_5xx(before, False)
         checks.check("server-side 5xx on API endpoints did not grow", api_5xx == 0, f"delta={api_5xx:.0f}")
+        uptime_before = metric(before, "process_uptime_seconds")
+        uptime_after = metric(after, "process_uptime_seconds")
+        checks.check("service did not restart during the run", uptime_after > uptime_before,
+                     f"uptime {uptime_before:.0f}s -> {uptime_after:.0f}s")
         health_503 = server_5xx(after, True) - server_5xx(before, True)
         print(f"  (info) /health/ready 503s during the run: {health_503:.0f}")
 
@@ -393,6 +416,7 @@ async def main():
             everything.status.update(o.status)
             everything.reasons.update(o.reasons)
             everything.transport.update(o.transport)
+            everything.edge.update(o.edge)
             for k, v in o.latency.items():
                 everything.latency[k].extend(v)
         print("\n== Outcome table (storm + stampede + functional checks)")
@@ -405,7 +429,8 @@ async def main():
             ("declined: idempotency_key_conflict (409)", everything.reasons["idempotency_key_conflict"]),
             ("shed: overloaded (429)", everything.status[429]),
             ("other 4xx", sum(n for s, n in everything.status.items() if 400 <= s < 500 and s not in (409, 429))),
-            ("server errors (5xx)", everything.server_errors),
+            ("server errors (5xx from the app)", everything.server_errors),
+            ("proxy errors (502/503/504, not from the app)", sum(everything.edge.values())),
             ("client timeouts / transport errors", sum(everything.transport.values())),
             ("hot-seat A12 winners", len(storm_wins)),
             ("seats sold (main show)", f"{c['confirmed']} / {final['total_seats']}"),
@@ -416,6 +441,8 @@ async def main():
             print(f"  {name:<{width}}  {value}")
         if everything.transport:
             print(f"  transport detail: {dict(everything.transport)}")
+        if everything.edge:
+            print(f"  proxy error detail: {dict(everything.edge)}")
         print("\n  latency (s)      p50     p95     p99     max")
         for code in sorted(everything.latency):
             v = everything.latency[code]

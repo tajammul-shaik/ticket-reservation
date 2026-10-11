@@ -418,7 +418,7 @@ openssl rand -hex 16      # ADMIN_SECRET
    | Region | nearest to your Aiven region |
    | Instance type | **Free** (512 MB) |
    | Dockerfile path | `./Dockerfile` |
-   | Health check path (Advanced) | **`/health/ready`** |
+   | Health check path (Advanced) | **`/health/live`** (see the note below) |
    | Auto-deploy | **On** |
 
 4. Add the **environment variables**:
@@ -431,12 +431,19 @@ openssl rand -hex 16      # ADMIN_SECRET
    | `DATABASE_PASSWORD` | the Aiven password |
    | `JWT_SECRET` | from step 3 |
    | `ADMIN_SECRET` | from step 3 |
-   | `DB_POOL_MAX_SIZE` | `5` (raise only if Aiven's connection limit allows; the readiness check uses one more) |
+   | `DB_POOL_MAX_SIZE` (or `DB_POOL_SIZE`) | `5` (raise only if Aiven's connection limit allows; the readiness check uses one more) |
    | `ADMISSION_MAX_IN_FLIGHT` | optional; leave unset for the prod default `50` |
 
    **Do not set `PORT`**, because Render provides it and the app reads it.
 
 5. Click **Create Web Service**.
+
+> **Why `/health/live` and not `/health/ready`.** Render uses its health check both to gate deploys and to restart instances it thinks are
+> unhealthy. Under a burst the free instance's small CPU share delayed `/health/ready` past its
+> 2 s limit, and Render restarted a working instance mid-burst. `/health/live` never touches the
+> database, so it fails only when the process is really stuck. The deploy gate still covers the
+> database: Flyway runs before the web server listens, so a build that cannot reach the database
+> never answers `/health/live` and the deploy fails.
 
 ### Step 5: watch the first deploy
 
@@ -446,7 +453,8 @@ Render goes through these stages:
    the build logs. The first build is the slowest.
 2. **Start:** the container starts with your variables. The app connects to Aiven, and Flyway
    creates `shows`, `seats`, `reservations` and `user_show_counts` in `defaultdb`.
-3. **Health check:** Render polls `/health/ready`. The deploy goes live only after it returns 200.
+3. **Health check:** Render polls `/health/live`. The deploy goes live only after it returns 200,
+   which happens only once Flyway has connected to the database and migrated.
 4. **Live:** the service is served at `https://<your-service>.onrender.com`.
 
 If a secret is missing or the database is unreachable, the deploy fails and the previous version
@@ -502,12 +510,12 @@ All settings are environment variables. In the `prod` profile the secrets and da
 | `DATABASE_USERNAME` | `root` | **required** | DB user |
 | `DATABASE_PASSWORD` | `root` | **required** | DB password |
 | `DB_POOL_MIN_IDLE` | `10` | = `DB_POOL_MAX_SIZE` | Hikari minimum idle connections (prod keeps the pool full) |
-| `DB_POOL_MAX_SIZE` | `20` | `10` | Hikari maximum pool size (readiness uses one extra connection of its own) |
+| `DB_POOL_MAX_SIZE` | `20` | `10` | Hikari maximum pool size (readiness uses one extra connection of its own). `DB_POOL_SIZE` is accepted as an alias; `DB_POOL_MAX_SIZE` wins if both are set |
 | `DB_POOL_CONNECTION_TIMEOUT_MS` | `30000` | `30000` | how long a request waits for a pooled connection before `429 overloaded`; also the JDBC login timeout, so don't lower it (a 5 s value failed startup against Aiven) |
 | `JWT_SECRET` | dev value | **required** | HS256 signing key, at least 32 bytes |
 | `ADMIN_SECRET` | dev value | **required** | value of `X-Admin-Secret` that yields an admin token |
 | `ADMISSION_MAX_IN_FLIGHT` | `200` | `50` | concurrent requests before new ones queue at the door, then get 429 |
-| `ADMISSION_MAX_WAIT` | `5s` | `5s` | how long a request waits for an admission slot before 429 |
+| `ADMISSION_MAX_WAIT` | `5s` | `5s` | how long a request waits for an admission slot before 429 (a bare number is milliseconds). `ADMISSION_ACQUIRE_TIMEOUT` is accepted as an alias; `ADMISSION_MAX_WAIT` wins if both are set |
 | `ENV_FILE` | `~/.config/ticket-reservation/ticket-reservation.env` | not used | path of the optional local env file |
 
 ## 12. Observability
@@ -558,7 +566,8 @@ are per instance and reset on restart. The snapshot shows aggregates only, never
 **Health.** `/health/live` checks only that the process is running. `/health/ready` runs
 `SELECT 1` with a hard 2 s limit and returns `503 not_ready` when the database is down. It uses
 its own one-connection pool, so a burst that saturates the main pool does not make it fail. Render
-uses `/health/ready` as the deploy gate.
+uses `/health/live` as its health check; `/health/ready` and `/monitoring` show whether the
+database answers.
 
 ## 13. Error codes
 

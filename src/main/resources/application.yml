@@ -22,7 +22,8 @@ spring:
     hikari:
       pool-name: ticket-reservation-pool
       minimum-idle: ${DB_POOL_MIN_IDLE:10}
-      maximum-pool-size: ${DB_POOL_MAX_SIZE:20}
+      # DB_POOL_SIZE is accepted as an alias of DB_POOL_MAX_SIZE (the name used on Render).
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:${DB_POOL_SIZE:20}}
       # How long a request waits for a pooled connection before it is shed as 429. Hikari also
       # derives the JDBC login timeout from it, through DriverManager, which is JVM-wide: too low
       # and a TLS login to managed MySQL fails at startup (5 s did, on Render + Aiven). Shed
@@ -56,7 +57,9 @@ app:
   admission:
     # NFR-04: requests beyond this many in flight wait up to max-wait for a slot, then get 429.
     max-in-flight: ${ADMISSION_MAX_IN_FLIGHT:200}
-    max-wait: ${ADMISSION_MAX_WAIT:5s}
+    # ADMISSION_ACQUIRE_TIMEOUT is accepted as an alias (the name used on Render). A bare
+    # number is milliseconds; "5s" style values also work.
+    max-wait: ${ADMISSION_MAX_WAIT:${ADMISSION_ACQUIRE_TIMEOUT:5s}}
 
 management:
   endpoints:

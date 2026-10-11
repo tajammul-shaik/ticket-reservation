@@ -21,6 +21,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>
  * One grouped query serves all gauges of a scrape: its result is cached briefly, so a scrape
  * costs one query, not three per show, and the three gauges of a show come from one snapshot.
+ * A failed refresh is cached for the same time: otherwise every gauge of the scrape would retry
+ * the query, each waiting up to the pool's connection timeout, and /metrics would hang for
+ * minutes while the database is down or the pool is saturated.
  */
 @Component
 public class SeatGauges {
@@ -32,6 +35,7 @@ public class SeatGauges {
     private final MeterRegistry registry;
     private final Set<String> registeredShows = ConcurrentHashMap.newKeySet();
 
+    /** countsByShow is null when the refresh failed; the gauges then report NaN. */
     private record Snapshot(long takenAtNanos, Map<String, Map<String, Long>> countsByShow) {
     }
 
@@ -62,11 +66,11 @@ public class SeatGauges {
     }
 
     private double count(String showId, String status) {
-        Snapshot current = currentSnapshot();
-        if (current == null) {
+        Map<String, Map<String, Long>> counts = currentSnapshot().countsByShow();
+        if (counts == null) {
             return Double.NaN;
         }
-        return current.countsByShow().getOrDefault(showId, Map.of()).getOrDefault(status, 0L);
+        return counts.getOrDefault(showId, Map.of()).getOrDefault(status, 0L);
     }
 
     private Snapshot currentSnapshot() {
@@ -79,8 +83,8 @@ public class SeatGauges {
             if (System.nanoTime() - current.takenAtNanos() < SNAPSHOT_TTL.toNanos()) {
                 return current;
             }
+            Map<String, Map<String, Long>> counts = new HashMap<>();
             try {
-                Map<String, Map<String, Long>> counts = new HashMap<>();
                 jdbcTemplate.query(
                         "SELECT show_id, status, COUNT(*) AS n FROM seats GROUP BY show_id, status",
                         rs -> {
@@ -88,12 +92,13 @@ public class SeatGauges {
                                     .put(rs.getString("status"), rs.getLong("n"));
                         });
                 snapshot = new Snapshot(System.nanoTime(), counts);
-                return snapshot;
             } catch (RuntimeException e) {
-                // Database unreachable: report NaN rather than stale numbers.
+                // Database unreachable: report NaN rather than stale numbers, and do not retry
+                // until the snapshot expires.
                 log.warn("Seat gauge refresh failed: {}", e.getClass().getSimpleName());
-                return null;
+                snapshot = new Snapshot(System.nanoTime(), null);
             }
+            return snapshot;
         }
     }
 }
