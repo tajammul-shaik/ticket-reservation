@@ -25,6 +25,17 @@ spring:
       maximum-pool-size: ${DB_POOL_MAX_SIZE:20}
       connection-timeout: 30000
       transaction-isolation: TRANSACTION_READ_COMMITTED
+      data-source-properties:
+        # Lets JDBC batches (seat inserts on show creation) go to MySQL as multi-row INSERTs.
+        rewriteBatchedStatements: true
+
+  jackson:
+    # JSON fields are snake_case (price_paise, per_user_limit) as in the BRD.
+    property-naming-strategy: SNAKE_CASE
+    deserialization:
+      # Money is integer paise only (BR-13): 250.5 must be a 400, not silently truncated.
+      accept-float-as-int: false
+      fail-on-unknown-properties: false
 
   flyway:
     enabled: true
@@ -34,6 +45,7 @@ app:
   security:
     jwt-secret: ${JWT_SECRET:local-dev-jwt-secret-change-me-at-least-32-bytes}
     admin-secret: ${ADMIN_SECRET:local-admin-secret}
+    token-ttl: 24h
 
 management:
   endpoints:
