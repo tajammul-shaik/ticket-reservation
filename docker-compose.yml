@@ -22,12 +22,13 @@ services:
       - "3307:3306"
     healthcheck:
       # "Healthy" only once MySQL accepts logins, so the app never starts against a
-      # half-initialised database.
+      # half-initialised database. The first start initialises the data directory, which can
+      # take minutes on a slow disk; failures during start_period do not count.
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u ticket_app -p$${MYSQL_PASSWORD} --silent"]
       interval: 5s
       timeout: 5s
       retries: 30
-      start_period: 20s
+      start_period: 300s
 
   app:
     build: .
